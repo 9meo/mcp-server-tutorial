@@ -1,0 +1,36 @@
+# Weather MCP Server Dockerfile
+# Build: docker build -t weather-mcp .
+# Run: docker run -p 8000:8000 weather-mcp
+
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install UV
+RUN pip install uv
+
+# Copy project files
+COPY pyproject.toml ./
+COPY weather_server.py ./
+COPY README.md ./
+
+# Install dependencies
+RUN uv sync
+
+# Expose port for HTTP transport (optional)
+EXPOSE 8000
+
+# Environment variables
+ENV SSL_VERIFY=false
+ENV PYTHONUNBUFFERED=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD python -c "import httpx; import asyncio; asyncio.run(httpx.get('https://api.open-meteo.com/v1/forecast?latitude=0&longitude=0&current=temperature_2m', timeout=5))" || exit 1
+
+# Default command (stdio transport)
+CMD ["uv", "run", "python", "weather_server.py"]
+
+# Alternative: HTTP transport
+# CMD ["uv", "run", "python", "-c", "from weather_server import mcp; mcp.run(transport='http', port=8000)"]
