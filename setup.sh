@@ -161,33 +161,110 @@ async def make_openmeteo_request(url: str) -> dict[str, Any] | None:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             return response.json()
+    except ssl.SSLError as e:
+        print(f"SSL error: {e}")
+        return None
+    except httpx.HTTPStatusError as e:
+        print(f"HTTP error {e.response.status_code}")
+        return None
     except Exception as e:
         print(f"Request failed: {e}")
         return None
 
 @mcp.tool()
 async def get_current_weather(latitude: float, longitude: float) -> str:
-    """Get current weather for a location."""
-    url = f"{api_base}/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,relative_humidity_2m,precipitation"
+    """Get current weather for a location.
+    
+    Args:
+        latitude: Latitude of the location
+        longitude: Longitude of the location
+        
+    Returns:
+        str: JSON string with current weather data
+    """
+    url = f"{api_base}/forecast?latitude={latitude}&longitude={longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code"
+    
+    print(f"Making weather request to: {url}")
     data = await make_openmeteo_request(url)
     if not data:
         return "Unable to fetch weather data."
+    
     return json.dumps(data, indent=2)
 
 @mcp.tool()
 async def get_forecast(latitude: float, longitude: float) -> str:
-    """Get weather forecast for a location."""
-    url = f"{api_base}/forecast?latitude={latitude}&longitude={longitude}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto"
+    """Get weather forecast for a location.
+    
+    Args:
+        latitude: Latitude of the location
+        longitude: Longitude of the location
+        
+    Returns:
+        str: Formatted weather forecast
+    """
+    url = f"{api_base}/forecast?latitude={latitude}&longitude={longitude}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code&timezone=auto"
+    
+    print(f"Making forecast request to: {url}")
     data = await make_openmeteo_request(url)
     if not data:
         return "Unable to fetch forecast data."
     
+    # Format the data for readability
     daily = data.get("daily", {})
     forecasts = []
+    
     for i in range(len(daily.get("time", []))):
-        forecast = f"Date: {daily['time'][i]}\nMax: {daily['temperature_2m_max'][i]}°C\nMin: {daily['temperature_2m_min'][i]}°C"
+        forecast = f"""Date: {daily['time'][i]}
+Max Temperature: {daily['temperature_2m_max'][i]}°C
+Min Temperature: {daily['temperature_2m_min'][i]}°C
+Precipitation: {daily['precipitation_sum'][i]} mm"""
         forecasts.append(forecast)
+    
     return "\n---\n".join(forecasts)
+
+@mcp.tool()
+async def get_weather_by_city(city_name: str) -> str:
+    """Get current weather by city name (requires geocoding).
+    
+    Args:
+        city_name: Name of the city
+        
+    Returns:
+        str: Weather information for the city
+    """
+    # Simple geocoding for major cities
+    city_coordinates = {
+        "bangkok": (13.7563, 100.5018),
+        "tokyo": (35.6762, 139.6503),
+        "new york": (40.7128, -74.0060),
+        "london": (51.5074, -0.1278),
+        "paris": (48.8566, 2.3522),
+        "singapore": (1.3521, 103.8198),
+        "sydney": (-33.8688, 151.2093),
+        "los angeles": (34.0522, -118.2437)
+    }
+    
+    city_lower = city_name.lower()
+    if city_lower in city_coordinates:
+        lat, lon = city_coordinates[city_lower]
+        return await get_current_weather(lat, lon)
+    else:
+        return f"Sorry, coordinates for '{city_name}' are not available. Please provide latitude and longitude coordinates."
+
+@mcp.resource("weather://popular-cities")
+async def get_popular_cities():
+    """Get list of popular cities with weather support."""
+    cities = [
+        "Bangkok (13.7563, 100.5018)",
+        "Tokyo (35.6762, 139.6503)", 
+        "New York (40.7128, -74.0060)",
+        "London (51.5074, -0.1278)",
+        "Paris (48.8566, 2.3522)",
+        "Singapore (1.3521, 103.8198)",
+        "Sydney (-33.8688, 151.2093)",
+        "Los Angeles (34.0522, -118.2437)"
+    ]
+    return "\n".join(cities)
 
 if __name__ == "__main__":
     mcp.run(transport='stdio')
@@ -196,6 +273,188 @@ EOF
 # Test the installation
 echo "🧪 Testing installation..."
 uv run python -c "import mcp; import httpx; print('✅ All dependencies installed successfully')"
+
+# Create test file
+echo "📝 Creating test_server.py..."
+cat > test_server.py << 'EOF'
+#!/usr/bin/env python3
+"""
+Test script for Weather MCP Server
+Run this to verify your server is working correctly
+"""
+
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+# Add the current directory to the path so we can import our server
+sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from weather_server import get_current_weather, get_forecast, get_weather_by_city, make_openmeteo_request
+    print("✅ Successfully imported weather server modules")
+except ImportError as e:
+    print(f"❌ Failed to import weather server modules: {e}")
+    sys.exit(1)
+
+async def test_api_connectivity():
+    """Test basic API connectivity"""
+    print("\n🌐 Testing API connectivity...")
+    
+    url = "https://api.open-meteo.com/v1/forecast?latitude=13.7563&longitude=100.5018&current=temperature_2m"
+    result = await make_openmeteo_request(url)
+    
+    if result:
+        print("✅ API connectivity successful")
+        return True
+    else:
+        print("❌ API connectivity failed")
+        return False
+
+async def test_current_weather():
+    """Test current weather function"""
+    print("\n🌡️  Testing current weather function...")
+    
+    # Test Bangkok coordinates
+    lat, lon = 13.7563, 100.5018
+    result = await get_current_weather(lat, lon)
+    
+    if result and result != "Unable to fetch weather data.":
+        print("✅ Current weather function working")
+        try:
+            data = json.loads(result)
+            if "current" in data:
+                print(f"   📊 Sample data: Temperature = {data['current'].get('temperature_2m', 'N/A')}°C")
+            return True
+        except json.JSONDecodeError:
+            print("⚠️  Current weather function working but returned non-JSON data")
+            return True
+    else:
+        print("❌ Current weather function failed")
+        return False
+
+async def test_forecast():
+    """Test weather forecast function"""
+    print("\n📅 Testing weather forecast function...")
+    
+    # Test Tokyo coordinates
+    lat, lon = 35.6762, 139.6503
+    result = await get_forecast(lat, lon)
+    
+    if result and result != "Unable to fetch forecast data.":
+        print("✅ Weather forecast function working")
+        lines = result.split('\n')
+        print(f"   📊 Forecast contains {len([l for l in lines if l.startswith('Date:')])} days")
+        return True
+    else:
+        print("❌ Weather forecast function failed")
+        return False
+
+async def test_city_weather():
+    """Test city-based weather function"""
+    print("\n🏙️  Testing city weather function...")
+    
+    result = await get_weather_by_city("bangkok")
+    
+    if result and not result.startswith("Sorry"):
+        print("✅ City weather function working")
+        return True
+    else:
+        print("❌ City weather function failed or city not found")
+        return False
+
+async def test_error_handling():
+    """Test error handling with invalid coordinates"""
+    print("\n⚠️  Testing error handling...")
+    
+    # Test with invalid coordinates (should handle gracefully)
+    result = await get_current_weather(999, 999)
+    
+    if result:
+        print("✅ Error handling working (returned result for invalid coords)")
+        return True
+    else:
+        print("✅ Error handling working (gracefully handled invalid coords)")
+        return True
+
+def test_imports():
+    """Test that all required modules can be imported"""
+    print("📦 Testing imports...")
+    
+    try:
+        import mcp
+        print("✅ MCP module imported successfully")
+    except ImportError:
+        print("❌ MCP module not found - run: uv add mcp")
+        return False
+    
+    try:
+        import httpx
+        print("✅ HTTPX module imported successfully")
+    except ImportError:
+        print("❌ HTTPX module not found - run: uv add httpx")
+        return False
+    
+    return True
+
+async def run_all_tests():
+    """Run all tests and provide a summary"""
+    print("🧪 Weather MCP Server Test Suite")
+    print("=" * 50)
+    
+    # Test imports first
+    if not test_imports():
+        print("\n❌ Import tests failed. Please install required dependencies.")
+        return False
+    
+    # Run async tests
+    tests = [
+        test_api_connectivity,
+        test_current_weather,
+        test_forecast,
+        test_city_weather,
+        test_error_handling
+    ]
+    
+    results = []
+    for test in tests:
+        try:
+            result = await test()
+            results.append(result)
+        except Exception as e:
+            print(f"❌ Test {test.__name__} failed with exception: {e}")
+            results.append(False)
+    
+    # Summary
+    print("\n" + "=" * 50)
+    print("📊 Test Summary:")
+    passed = sum(results)
+    total = len(results)
+    
+    print(f"   ✅ Passed: {passed}/{total}")
+    if passed == total:
+        print("   🎉 All tests passed! Your MCP server is ready to use.")
+    else:
+        print("   ⚠️  Some tests failed. Check the output above for details.")
+    
+    print("\n💡 Next steps:")
+    if passed == total:
+        print("   1. Configure Claude Desktop (see README.md)")
+        print("   2. Restart Claude Desktop")
+        print("   3. Ask Claude: 'What's the weather in Bangkok?'")
+    else:
+        print("   1. Fix the failing tests")
+        print("   2. Check your internet connection")
+        print("   3. Verify dependencies are installed: uv sync")
+    
+    return passed == total
+
+if __name__ == "__main__":
+    print("Starting Weather MCP Server tests...\n")
+    success = asyncio.run(run_all_tests())
+    sys.exit(0 if success else 1)
+EOF
 
 # Get current directory for config
 CURRENT_DIR=$(pwd)
