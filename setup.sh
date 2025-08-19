@@ -3,8 +3,9 @@
 # Weather MCP Server Setup Script
 # This script sets up the complete environment for the Weather MCP Server
 # Compatible with: Linux, macOS, WSL (Windows Subsystem for Linux)
+# Uses Python 3.10 specifically
 
-echo "🌦️  Setting up Weather MCP Server..."
+echo "🌦️  Setting up Weather MCP Server with Python 3.10..."
 
 # Detect if running in WSL
 if grep -qEi "(Microsoft|WSL)" /proc/version &> /dev/null; then
@@ -12,6 +13,63 @@ if grep -qEi "(Microsoft|WSL)" /proc/version &> /dev/null; then
     WSL_ENV=true
 else
     WSL_ENV=false
+fi
+
+# Function to check Python 3.10 availability
+check_python310() {
+    if command -v python3.10 &> /dev/null; then
+        echo "✅ Python 3.10 is available"
+        return 0
+    else
+        echo "⚠️  Python 3.10 not found"
+        return 1
+    fi
+}
+
+# Install Python 3.10 if not available
+install_python310() {
+    echo "📦 Installing Python 3.10..."
+    
+    if [[ "$OSTYPE" == "linux-gnu"* ]] || [ "$WSL_ENV" = true ]; then
+        # Linux/WSL
+        if command -v apt &> /dev/null; then
+            # Ubuntu/Debian
+            sudo apt update
+            sudo apt install -y python3.10 python3.10-venv python3.10-dev python3-pip curl
+        elif command -v yum &> /dev/null; then
+            # CentOS/RHEL
+            sudo yum install -y python3.10 python3.10-venv python3.10-devel curl
+        elif command -v dnf &> /dev/null; then
+            # Fedora
+            sudo dnf install -y python3.10 python3.10-venv python3.10-devel curl
+        elif command -v pacman &> /dev/null; then
+            # Arch Linux
+            sudo pacman -S python python-pip curl
+        else
+            echo "❌ Unsupported Linux distribution. Please install Python 3.10 manually."
+            exit 1
+        fi
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        if command -v brew &> /dev/null; then
+            brew install python@3.10
+        else
+            echo "❌ Homebrew not found. Please install Python 3.10 manually."
+            echo "   Install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            exit 1
+        fi
+    fi
+}
+
+# Check and install Python 3.10
+if ! check_python310; then
+    install_python310
+    
+    # Check again after installation
+    if ! check_python310; then
+        echo "❌ Failed to install Python 3.10. Please install manually."
+        exit 1
+    fi
 fi
 
 # Check if UV is installed
@@ -51,9 +109,18 @@ echo "📁 Creating project directory: $PROJECT_DIR"
 mkdir -p $PROJECT_DIR
 cd $PROJECT_DIR
 
-# Initialize UV project
-echo "🚀 Initializing UV project..."
-uv init --name weather-mcp
+# Set UV to use Python 3.10 specifically
+echo "🐍 Configuring UV to use Python 3.10..."
+uv python install 3.10
+uv python pin 3.10
+
+# Initialize UV project with Python 3.10
+echo "🚀 Initializing UV project with Python 3.10..."
+uv init --name weather-mcp --python 3.10
+
+# Verify Python version
+echo "🔍 Verifying Python version..."
+uv run python --version
 
 # Add dependencies (one by one to avoid conflicts)
 echo "📚 Installing dependencies..."
