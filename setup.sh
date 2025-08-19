@@ -85,23 +85,79 @@ if ! command -v uv &> /dev/null; then
         # Add UV to PATH for current session
         export PATH="$HOME/.local/bin:$PATH"
         
-        # Add to shell profile
-        if [ -f ~/.bashrc ]; then
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-        fi
-        if [ -f ~/.zshrc ]; then
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+        # Add to shell profiles
+        for profile in ~/.bashrc ~/.zshrc ~/.profile; do
+            if [ -f "$profile" ]; then
+                if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$profile"; then
+                    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$profile"
+                fi
+            fi
+        done
+        
+        # For WSL: Create system-wide UV access
+        if [ "$WSL_ENV" = true ]; then
+            echo "🐧 Setting up UV for WSL system-wide access..."
+            
+            # Create symlink in /usr/local/bin (if we have permission)
+            if [ -w /usr/local/bin ] || sudo -n true 2>/dev/null; then
+                sudo ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv 2>/dev/null || true
+                sudo ln -sf "$HOME/.local/bin/uvx" /usr/local/bin/uvx 2>/dev/null || true
+            fi
+            
+            # Also try /usr/bin
+            if [ -w /usr/bin ] || sudo -n true 2>/dev/null; then
+                sudo ln -sf "$HOME/.local/bin/uv" /usr/bin/uv 2>/dev/null || true
+            fi
+            
+            # Create wrapper script as backup
+            mkdir -p "$HOME/bin"
+            cat > "$HOME/bin/uv" << 'UVWRAPPER'
+#!/bin/bash
+exec "$HOME/.local/bin/uv" "$@"
+UVWRAPPER
+            chmod +x "$HOME/bin/uv"
+            
+            # Add ~/bin to PATH as well
+            export PATH="$HOME/bin:$PATH"
+            for profile in ~/.bashrc ~/.zshrc ~/.profile; do
+                if [ -f "$profile" ]; then
+                    if ! grep -q 'export PATH="$HOME/bin:$PATH"' "$profile"; then
+                        echo 'export PATH="$HOME/bin:$PATH"' >> "$profile"
+                    fi
+                fi
+            done
         fi
     fi
 else
     echo "✅ UV is already installed"
 fi
 
-# Verify UV is available
+# Verify UV is available and try multiple methods to make it accessible
 if ! command -v uv &> /dev/null; then
-    echo "⚠️  UV not found in PATH. Trying to source shell profile..."
-    source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null || true
+    echo "⚠️  UV not found in PATH. Trying multiple fixes..."
+    
+    # Method 1: Source shell profiles
+    source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null || source ~/.profile 2>/dev/null || true
+    
+    # Method 2: Explicit PATH export
+    export PATH="$HOME/.local/bin:$HOME/bin:$PATH"
+    
+    # Method 3: Create temporary symlink
+    if [ ! -f /tmp/uv ] && [ -f "$HOME/.local/bin/uv" ]; then
+        ln -sf "$HOME/.local/bin/uv" /tmp/uv
+        export PATH="/tmp:$PATH"
+    fi
+    
+    # Final check
+    if ! command -v uv &> /dev/null; then
+        echo "❌ UV installation failed. Please install manually:"
+        echo "   curl -LsSf https://astral.sh/uv/install.sh | sh"
+        echo "   source ~/.bashrc"
+        exit 1
+    fi
 fi
+
+echo "✅ UV is accessible at: $(which uv)"
 
 # Create project directory
 PROJECT_DIR="weather-mcp"
@@ -472,12 +528,35 @@ if [ "$WSL_ENV" = true ]; then
     echo "   Add to: %APPDATA%/Claude/claude_desktop_config.json (Windows path)"
     echo "   Or: ~/AppData/Roaming/Claude/claude_desktop_config.json (from WSL)"
     echo ""
-    echo "   WSL Config (Recommended):"
+    echo "   WSL Config Option 1 (Using system UV):"
     echo '   {'
     echo '     "mcpServers": {'
     echo '       "weather": {'
     echo '         "command": "wsl",'
-    echo "         \"args\": [\"-e\", \"bash\", \"-c\", \"cd $CURRENT_DIR && uv run python weather_server.py\"],"
+    echo "         \"args\": [\"-e\", \"uv\", \"run\", \"--directory\", \"$CURRENT_DIR\", \"python\", \"weather_server.py\"],"
+    echo '         "env": {"SSL_VERIFY": "false"}'
+    echo '       }'
+    echo '     }'
+    echo '   }'
+    echo ""
+    echo "   WSL Config Option 2 (Using absolute path):"
+    UV_PATH=$(which uv 2>/dev/null || echo "$HOME/.local/bin/uv")
+    echo '   {'
+    echo '     "mcpServers": {'
+    echo '       "weather": {'
+    echo '         "command": "wsl",'
+    echo "         \"args\": [\"-e\", \"$UV_PATH\", \"run\", \"--directory\", \"$CURRENT_DIR\", \"python\", \"weather_server.py\"],"
+    echo '         "env": {"SSL_VERIFY": "false"}'
+    echo '       }'
+    echo '     }'
+    echo '   }'
+    echo ""
+    echo "   WSL Config Option 3 (Using bash wrapper):"
+    echo '   {'
+    echo '     "mcpServers": {'
+    echo '       "weather": {'
+    echo '         "command": "wsl",'
+    echo "         \"args\": [\"-e\", \"bash\", \"-c\", \"export PATH=\\\"$HOME/.local/bin:$HOME/bin:\\$PATH\\\" && cd $CURRENT_DIR && uv run python weather_server.py\"],"
     echo '         "env": {"SSL_VERIFY": "false"}'
     echo '       }'
     echo '     }'
@@ -487,7 +566,7 @@ if [ "$WSL_ENV" = true ]; then
     WSL_DISTRO=$(cat /proc/version | grep -oE 'Microsoft|WSL' | head -1)
     if [ -n "$WSL_DISTRO" ]; then
         # Try to detect WSL distribution name
-        WSL_NAME=$(wsl.exe -l | grep -E '\*|\(Default\)' | sed 's/.*\s\([A-Za-z]*\).*/\1/' 2>/dev/null || echo "Ubuntu")
+        WSL_NAME=$(wsl.exe -l -q 2>/dev/null | head -2 | tail -1 | tr -d '\r' 2>/dev/null || echo "Ubuntu")
         echo "         \"args\": [\"run\", \"--directory\", \"\\\\\\\\wsl\$\\\\$WSL_NAME\\\\$CURRENT_DIR\", \"python\", \"weather_server.py\"],"
     fi
 else
@@ -517,10 +596,11 @@ if [ "$WSL_ENV" = true ]; then
     echo "   • Your project is at: $CURRENT_DIR"
     echo "   • Access from Windows: \\\\wsl\$\\Ubuntu$CURRENT_DIR"
     echo "   • Use 'code .' to open in VS Code with WSL extension"
-    echo "   • WSL typically has better performance than Windows native"
+    echo "   • If UV not found by Claude, run: ./fix_wsl_uv.sh"
 fi
 
 echo "🔧 Troubleshooting:"
-echo "   • Run 'uv run python test_server.py' to test"
-echo "   • Check PATH if UV not found: source ~/.bashrc"
-echo "   • Use absolute paths in Claude config"
+echo "   • Test server: uv run python test_server.py"
+echo "   • Test full suite: uv run python test_server.py"
+echo "   • Fix WSL path issues: ./fix_wsl_uv.sh"
+echo "   • Manual UV path: $HOME/.local/bin/uv"
