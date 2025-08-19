@@ -18,18 +18,18 @@ A Model Context Protocol (MCP) server that provides weather information using th
 
 **Linux/macOS/WSL:**
 ```bash
-curl -sSL https://raw.githubusercontent.com/your-repo/weather-mcp/main/setup.sh | bash
+curl -sSL https://raw.githubusercontent.com/9meo/mcp-server-tutorial/main/setup.sh | bash
 ```
 
 **Windows:**
 ```cmd
-curl -sSL https://raw.githubusercontent.com/your-repo/weather-mcp/main/setup.bat -o setup.bat && setup.bat
+curl -sSL https://raw.githubusercontent.com/9meo/mcp-server-tutorial/main/setup.bat -o setup.bat && setup.bat
 ```
 
 **WSL (Windows Subsystem for Linux):**
 ```bash
 # Open WSL terminal and run:
-curl -sSL https://raw.githubusercontent.com/your-repo/weather-mcp/main/setup.sh | bash
+curl -sSL https://raw.githubusercontent.com/9meo/mcp-server-tutorial/main/setup.sh | bash
 ```
 
 ### Option 2: Manual Setup
