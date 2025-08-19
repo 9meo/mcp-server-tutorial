@@ -2,22 +2,47 @@
 
 # Weather MCP Server Setup Script
 # This script sets up the complete environment for the Weather MCP Server
+# Compatible with: Linux, macOS, WSL (Windows Subsystem for Linux)
 
 echo "🌦️  Setting up Weather MCP Server..."
+
+# Detect if running in WSL
+if grep -qEi "(Microsoft|WSL)" /proc/version &> /dev/null; then
+    echo "🐧 Detected WSL environment"
+    WSL_ENV=true
+else
+    WSL_ENV=false
+fi
 
 # Check if UV is installed
 if ! command -v uv &> /dev/null; then
     echo "📦 Installing UV..."
     if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]]; then
-        # Windows
+        # Windows (shouldn't happen in WSL)
         powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     else
-        # macOS/Linux
+        # macOS/Linux/WSL
         curl -LsSf https://astral.sh/uv/install.sh | sh
-        source ~/.bashrc
+        
+        # Add UV to PATH for current session
+        export PATH="$HOME/.local/bin:$PATH"
+        
+        # Add to shell profile
+        if [ -f ~/.bashrc ]; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+        fi
+        if [ -f ~/.zshrc ]; then
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+        fi
     fi
 else
     echo "✅ UV is already installed"
+fi
+
+# Verify UV is available
+if ! command -v uv &> /dev/null; then
+    echo "⚠️  UV not found in PATH. Trying to source shell profile..."
+    source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null || true
 fi
 
 # Create project directory
@@ -30,11 +55,10 @@ cd $PROJECT_DIR
 echo "🚀 Initializing UV project..."
 uv init --name weather-mcp
 
-# Add dependencies
+# Add dependencies (one by one to avoid conflicts)
 echo "📚 Installing dependencies..."
 uv add mcp
 uv add httpx
-uv add "python>=3.8"
 
 # Create the main server file
 echo "📝 Creating weather_server.py..."
@@ -116,20 +140,61 @@ echo "📋 Next steps:"
 echo "1. Test the server:"
 echo "   uv run python weather_server.py"
 echo ""
-echo "2. Add to Claude Desktop config:"
-echo "   Path: ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)"
-echo "   Path: %APPDATA%/Claude/claude_desktop_config.json (Windows)"
-echo ""
-echo "   Config content:"
-echo '   {'
-echo '     "mcpServers": {'
-echo '       "weather": {'
-echo '         "command": "uv",'
-echo "         \"args\": [\"run\", \"--directory\", \"$CURRENT_DIR\", \"python\", \"weather_server.py\"],"
-echo '         "env": {"SSL_VERIFY": "false"}'
-echo '       }'
-echo '     }'
-echo '   }'
+
+if [ "$WSL_ENV" = true ]; then
+    echo "🐧 WSL Configuration for Claude Desktop:"
+    echo "   Add to: %APPDATA%/Claude/claude_desktop_config.json (Windows path)"
+    echo "   Or: ~/AppData/Roaming/Claude/claude_desktop_config.json (from WSL)"
+    echo ""
+    echo "   WSL Config (Recommended):"
+    echo '   {'
+    echo '     "mcpServers": {'
+    echo '       "weather": {'
+    echo '         "command": "wsl",'
+    echo "         \"args\": [\"-e\", \"bash\", \"-c\", \"cd $CURRENT_DIR && uv run python weather_server.py\"],"
+    echo '         "env": {"SSL_VERIFY": "false"}'
+    echo '       }'
+    echo '     }'
+    echo '   }'
+    echo ""
+    echo "   Alternative (Windows UNC path):"
+    WSL_DISTRO=$(cat /proc/version | grep -oE 'Microsoft|WSL' | head -1)
+    if [ -n "$WSL_DISTRO" ]; then
+        # Try to detect WSL distribution name
+        WSL_NAME=$(wsl.exe -l | grep -E '\*|\(Default\)' | sed 's/.*\s\([A-Za-z]*\).*/\1/' 2>/dev/null || echo "Ubuntu")
+        echo "         \"args\": [\"run\", \"--directory\", \"\\\\\\\\wsl\$\\\\$WSL_NAME\\\\$CURRENT_DIR\", \"python\", \"weather_server.py\"],"
+    fi
+else
+    echo "2. Add to Claude Desktop config:"
+    echo "   Path: ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)"
+    echo "   Path: %APPDATA%/Claude/claude_desktop_config.json (Windows)"
+    echo ""
+    echo "   Config content:"
+    echo '   {'
+    echo '     "mcpServers": {'
+    echo '       "weather": {'
+    echo '         "command": "uv",'
+    echo "         \"args\": [\"run\", \"--directory\", \"$CURRENT_DIR\", \"python\", \"weather_server.py\"],"
+    echo '         "env": {"SSL_VERIFY": "false"}'
+    echo '       }'
+    echo '     }'
+    echo '   }'
+fi
+
 echo ""
 echo "3. Restart Claude Desktop"
 echo "4. Ask Claude: 'What's the weather in Bangkok?'"
+echo ""
+
+if [ "$WSL_ENV" = true ]; then
+    echo "💡 WSL Tips:"
+    echo "   • Your project is at: $CURRENT_DIR"
+    echo "   • Access from Windows: \\\\wsl\$\\Ubuntu$CURRENT_DIR"
+    echo "   • Use 'code .' to open in VS Code with WSL extension"
+    echo "   • WSL typically has better performance than Windows native"
+fi
+
+echo "🔧 Troubleshooting:"
+echo "   • Run 'uv run python test_server.py' to test"
+echo "   • Check PATH if UV not found: source ~/.bashrc"
+echo "   • Use absolute paths in Claude config"
