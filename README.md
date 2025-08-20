@@ -16,7 +16,12 @@ A Model Context Protocol (MCP) server that provides weather information using th
 
 ### Option 1: Automated Setup
 
-**Linux/macOS/WSL:**
+**macOS:**
+```bash
+curl -sSL https://raw.githubusercontent.com/9meo/mcp-server-tutorial/main/setup_mac.sh | bash
+```
+
+**Linux/WSL:**
 ```bash
 curl -sSL https://raw.githubusercontent.com/9meo/mcp-server-tutorial/main/setup.sh | bash
 ```
